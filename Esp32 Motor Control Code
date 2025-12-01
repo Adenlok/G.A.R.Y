@@ -1,0 +1,111 @@
+#include <Arduino.h>
+#include <WiFi.h>
+#include <micro_ros_arduino.h>
+
+#include <rcl/rcl.h>
+#include <rclc/rclc.h>
+#include <rclc/executor.h>
+#include <std_msgs/msg/int32.h>
+
+// -------------------------
+// L298N Motor Pins
+// -------------------------
+#define IN1 25
+#define IN2 26
+#define ENA 27   // PWM pin
+
+// OLD LEDC CONFIG
+#define PWM_FREQ 1000
+#define PWM_RES 8  // 0–255
+
+// -------------------------
+// WiFi + micro-ROS
+// -------------------------
+char ssid[] = "Adentest";
+char password[] = "lebronjames";
+
+char agent_ip[] = "10.42.0.1";
+uint16_t agent_port = 8888;
+
+rcl_subscription_t sub;
+std_msgs__msg__Int32 cmd_msg;
+
+rcl_allocator_t allocator;
+rclc_executor_t executor;
+rcl_node_t node;
+rclc_support_t support;
+
+// -------------------------
+// MOTOR CALLBACK
+// -------------------------
+void motor_callback(const void * msg_in)
+{
+    const std_msgs__msg__Int32 * msg = (const std_msgs__msg__Int32 *)msg_in;
+    int cmd = msg->data;
+
+    int pwm = abs(cmd);
+    if (pwm > 255) pwm = 255;
+
+    if (cmd > 0) {
+        digitalWrite(IN1, HIGH);
+        digitalWrite(IN2, LOW);
+        ledcWrite(ENA, pwm);   // OLD CORE: write directly to pin
+    }
+    else if (cmd < 0) {
+        digitalWrite(IN1, LOW);
+        digitalWrite(IN2, HIGH);
+        ledcWrite(ENA, pwm);
+    }
+    else {
+        digitalWrite(IN1, LOW);
+        digitalWrite(IN2, LOW);
+        ledcWrite(ENA, 0);
+    }
+}
+
+// -------------------------
+// SETUP
+// -------------------------
+void setup()
+{
+    Serial.begin(115200);
+
+    pinMode(IN1, OUTPUT);
+    pinMode(IN2, OUTPUT);
+
+    // OLD ESP32 PWM attach
+    ledcAttach(ENA, PWM_FREQ, PWM_RES);
+
+    // connect WiFi + microROS
+    set_microros_wifi_transports(ssid, password, agent_ip, 8888);
+    Serial.print("ESP32 IP: ");
+   Serial.println(WiFi.localIP());
+    Serial.println("Connecting to micro-ROS agent...");
+    delay(2000);
+
+    allocator = rcl_get_default_allocator();
+
+    rclc_support_init(&support, 0, NULL, &allocator);
+    rclc_node_init_default(&node, "esp32_motor_node", "", &support);
+
+    rclc_subscription_init_default(
+        &sub,
+        &node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Int32),
+        "motor_cmd"
+    );
+
+    rclc_executor_init(&executor, &support.context, 1, &allocator);
+    rclc_executor_add_subscription(&executor, &sub, &cmd_msg, &motor_callback, ON_NEW_DATA);
+
+    Serial.println("ESP32 motor node ready.");
+}
+
+// -------------------------
+// LOOP
+// -------------------------
+void loop()
+{
+    rclc_executor_spin_some(&executor, RCL_MS_TO_NS(10));
+    delay(5);
+}
