@@ -42,7 +42,7 @@ def get_pwm_for_key(k):
         return TURN_SPEED, -TURN_SPEED
     if k == ' ':
         return 0, 0
-    return None
+    return 0,0
 
 class Teleop(Node):
     def __init__(self):
