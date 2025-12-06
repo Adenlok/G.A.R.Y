@@ -5,6 +5,7 @@ This is Aden's storage for all G.A.R.Y related code
 
 To turn on the hotspot run the following code:
   nmcli connection up MyHotspot
+  
 To autostart run: 
   nmcli connection modify Hotspot connection.autoconnect yes
 
