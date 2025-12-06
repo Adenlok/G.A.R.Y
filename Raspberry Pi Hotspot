@@ -1,0 +1,7 @@
+To turn on the hotspot run the following code:
+nmcli connection up MyHotspot
+To autostart run: 
+nmcli connection modify Hotspot connection.autoconnect yes
+
+To turn off the thotspot run the following code:
+nmcli connection down MyHotspot
