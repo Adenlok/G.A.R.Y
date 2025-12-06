@@ -8,15 +8,20 @@
 #include <std_msgs/msg/int32.h>
 
 // -------------------------
-// L298N Motor Pins
+// L298N MOTOR PINOUT (TANK DRIVE)
 // -------------------------
-#define IN1 25
-#define IN2 26
-#define ENA 27   // PWM pin
+// LEFT MOTOR
+#define IN1_L 25
+#define IN2_L 26
+#define ENA_L 27   // PWM
 
-// OLD LEDC CONFIG
+// RIGHT MOTOR
+#define IN1_R 32
+#define IN2_R 33
+#define ENA_R 14   // PWM
+
 #define PWM_FREQ 1000
-#define PWM_RES 8  // 0–255
+#define PWM_RES 8   // 0–255 range
 
 // -------------------------
 // WiFi + micro-ROS
@@ -35,32 +40,46 @@ rclc_executor_t executor;
 rcl_node_t node;
 rclc_support_t support;
 
-// -------------------------
-// MOTOR CALLBACK
-// -------------------------
-void motor_callback(const void * msg_in)
+// --------------------------------
+// MOTOR DRIVE FUNCTION
+// --------------------------------
+void driveMotor(int pwmValue, int IN1, int IN2, int ENA)
 {
-    const std_msgs__msg__Int32 * msg = (const std_msgs__msg__Int32 *)msg_in;
-    int cmd = msg->data;
-
-    int pwm = abs(cmd);
+    int pwm = abs(pwmValue);
     if (pwm > 255) pwm = 255;
 
-    if (cmd > 0) {
+    if (pwmValue > 0) {      // forward
         digitalWrite(IN1, HIGH);
         digitalWrite(IN2, LOW);
-        ledcWrite(ENA, pwm);   // OLD CORE: write directly to pin
+        ledcWrite(ENA, pwm);
     }
-    else if (cmd < 0) {
+    else if (pwmValue < 0) { // backward
         digitalWrite(IN1, LOW);
         digitalWrite(IN2, HIGH);
         ledcWrite(ENA, pwm);
     }
-    else {
+    else {                   // stop
         digitalWrite(IN1, LOW);
         digitalWrite(IN2, LOW);
         ledcWrite(ENA, 0);
     }
+}
+
+// --------------------------------
+// CALLBACK
+// msg.data = (leftPWM << 16) | (rightPWM & 0xFFFF)
+// --------------------------------
+void motor_callback(const void * msg_in)
+{
+    const std_msgs__msg__Int32 * msg = (const std_msgs__msg__Int32 *)msg_in;
+
+    int32_t raw = msg->data;
+
+    int16_t leftPWM  = (raw >> 16) & 0xFFFF;
+    int16_t rightPWM = raw & 0xFFFF;
+
+    driveMotor(leftPWM,  IN1_L, IN2_L, ENA_L);
+    driveMotor(rightPWM, IN1_R, IN2_R, ENA_R);
 }
 
 // -------------------------
@@ -70,35 +89,30 @@ void setup()
 {
     Serial.begin(115200);
 
-    pinMode(IN1, OUTPUT);
-    pinMode(IN2, OUTPUT);
+    pinMode(IN1_L, OUTPUT); pinMode(IN2_L, OUTPUT);
+    pinMode(IN1_R, OUTPUT); pinMode(IN2_R, OUTPUT);
 
-    // OLD ESP32 PWM attach
-    ledcAttach(ENA, PWM_FREQ, PWM_RES);
+    // Attach PWM channels
+    ledcAttach(ENA_L, PWM_FREQ, PWM_RES);
+    ledcAttach(ENA_R, PWM_FREQ, PWM_RES);
 
-    // connect WiFi + microROS
     set_microros_wifi_transports(ssid, password, agent_ip, 8888);
-    Serial.print("ESP32 IP: ");
-   Serial.println(WiFi.localIP());
-    Serial.println("Connecting to micro-ROS agent...");
+    Serial.println("Connecting to micro-ROS...");
     delay(2000);
 
     allocator = rcl_get_default_allocator();
-
     rclc_support_init(&support, 0, NULL, &allocator);
-    rclc_node_init_default(&node, "esp32_motor_node", "", &support);
+    rclc_node_init_default(&node, "esp32_tank_node", "", &support);
 
     rclc_subscription_init_default(
         &sub,
         &node,
         ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Int32),
-        "motor_cmd"
+        "tank_cmd"
     );
 
     rclc_executor_init(&executor, &support.context, 1, &allocator);
     rclc_executor_add_subscription(&executor, &sub, &cmd_msg, &motor_callback, ON_NEW_DATA);
-
-    Serial.println("ESP32 motor node ready.");
 }
 
 // -------------------------
