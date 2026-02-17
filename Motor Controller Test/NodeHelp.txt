@@ -1,0 +1,3 @@
+Make sure to build each node before reruning the launch code:
+
+colcon build --packages-select <package name>
