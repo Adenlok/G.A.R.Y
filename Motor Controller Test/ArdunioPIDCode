@@ -7,24 +7,27 @@ RoboClaw roboclaw(&roboclawSerial, 10000);
 
 #define ADDR 0x80
 
+// --- WATCHDOG SETTINGS ---
+unsigned long lastCommandTime = 0;      // Stores the timestamp of the last valid command
+const unsigned long TIMEOUT_THRESHOLD = 500; // Stop motors if no command for 500ms
+
 // --- PID CONSTANTS ---
-// You may need to adjust these for your specific motors
-// Kp, Ki, Kd, MaxQPPS (Quad Pulses Per Second)
 float Kp = .5;
 float Ki = 0.1;
 float Kd = 0.0;
-uint32_t qpps = 10000000; // This is the max speed of your motor in encoder counts
+uint32_t qpps = 10000000; 
 
 void setup() {
   Serial.begin(115200);        // USB to Jetson
   roboclaw.begin(38400);       // To RoboClaw
   
-  // Set PID Constants on the RoboClaw hardware
   roboclaw.SetM1VelocityPID(ADDR, Kp, Ki, Kd, qpps);
   roboclaw.SetM2VelocityPID(ADDR, Kp, Ki, Kd, qpps);
   
   pinMode(LED_BUILTIN, OUTPUT);
-  Serial.println("PID_CONTROLLER_READY");
+  Serial.println("PID_CONTROLLER_READY_WITH_WATCHDOG");
+  
+  lastCommandTime = millis(); // Initialize timer
 }
 
 void loop() {
@@ -33,32 +36,41 @@ void loop() {
     String data = Serial.readStringUntil('\n');
     data.trim();
     int commaIndex = data.indexOf(',');
+    
     if (commaIndex != -1) {
       long speedL = data.substring(0, commaIndex).toInt();
       long speedR = data.substring(commaIndex + 1).toInt();
       
-      // We still use Speed commands for PID control
-      roboclaw.SpeedM1(ADDR, speedL); // Keeping your reversed logic
+      // Execute motor commands
+      roboclaw.SpeedM1(ADDR, speedL); 
       roboclaw.SpeedM2(ADDR, speedR);
+
+      // Update the watchdog timer because we just got a valid command
+      lastCommandTime = millis();
+      digitalWrite(LED_BUILTIN, HIGH); // Visual feedback: we are receiving data
     }
   }
 
-  // 2. CONSTANTLY report status back to Python
+  // 2. SAFETY WATCHDOG CHECK
+  // If the difference between now and the last command is too large, stop the motors
+  if (millis() - lastCommandTime > TIMEOUT_THRESHOLD) {
+    roboclaw.SpeedM1(ADDR, 0); 
+    roboclaw.SpeedM2(ADDR, 0);
+    digitalWrite(LED_BUILTIN, LOW); // Visual feedback: Timeout active
+  }
+
+  // 3. CONSTANTLY report status back to Python
   static uint32_t lastReport = 0;
-  if (millis() - lastReport > 50) { // Report every 50ms (20Hz)
+  if (millis() - lastReport > 50) { 
     uint8_t status1, status2;
     bool valid1, valid2;
     
-    // Read Total Distance (Cumulative Pulses)
     int32_t encL = roboclaw.ReadEncM1(ADDR, &status1, &valid1);
     int32_t encR = roboclaw.ReadEncM2(ADDR, &status2, &valid2);
-    
-    // Read Current Speed (Pulses Per Second)
     int32_t speedL = roboclaw.ReadSpeedM1(ADDR, &status1, &valid1);
     int32_t speedR = roboclaw.ReadSpeedM2(ADDR, &status2, &valid2);
 
     if (valid1 && valid2) {
-      // Format: TELEMETRY:encL,encR,speedL,speedR
       Serial.print("TELEMETRY:");
       Serial.print(encL); Serial.print(",");
       Serial.print(encR); Serial.print(",");
