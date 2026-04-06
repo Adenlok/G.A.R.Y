@@ -31,7 +31,10 @@ Extras:
 Make sure esp launchs after the rest of code reset by pressing EN button
 
 
+4. GARY HOTSPOT
 
+SSID: GARY
+Pswd: gary12345678
 
 
 
